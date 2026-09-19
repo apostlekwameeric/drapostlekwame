@@ -1,6 +1,7 @@
 "use client";
 
 import BrandMark from "@/components/BrandMark";
+import { adminHeaders } from "@/lib/adminApi";
 import { prepareImage, uploadImage, type PreparedImage } from "@/lib/clientImage";
 import { brandLogoSrc, publishBrand, type BrandInfo } from "@/lib/useBrand";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -71,6 +72,7 @@ export default function BrandSettings({ open, brand, onClose, onSaved }: Props) 
       image,
       { name, tagline },
       "logo",
+      adminHeaders(),
     );
     if (!outcome.ok) {
       setStage("idle");
@@ -90,7 +92,11 @@ export default function BrandSettings({ open, brand, onClose, onSaved }: Props) 
     setError(null);
     setStage("uploading");
     try {
-      const res = await fetch("/api/brand", { method: "DELETE", cache: "no-store" });
+      const res = await fetch("/api/brand", {
+        method: "DELETE",
+        cache: "no-store",
+        headers: adminHeaders(),
+      });
       const data = (await res.json().catch(() => ({}))) as {
         brand?: BrandInfo;
         error?: string;

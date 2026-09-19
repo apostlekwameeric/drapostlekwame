@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   customType,
@@ -11,6 +12,40 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+export type SimStateJson = {
+  recentTemplates?: string[];
+  recentPersonas?: string[];
+  clearedAtId?: number;
+  lastReplyAt?: number;
+};
+
+export type DeviceCommand = {
+  type: "flip" | "camera" | "torch" | "mic" | "cam" | "media";
+  deviceId?: string;
+  facing?: "user" | "environment";
+  on?: boolean;
+  media?: "video" | "audio";
+  issuedAt: number;
+};
+
+export type DeviceInfo = {
+  cameras: { deviceId: string; label: string; facing: "user" | "environment" | "unknown" }[];
+  activeCameraId: string | null;
+  activeFacing: "user" | "environment" | "unknown";
+  torchSupported: boolean;
+  torchOn: boolean;
+  reportedAt: number;
+};
+
+export type MessageMeta = {
+  sim?: boolean;
+  flag?: string;
+  country?: string;
+  code?: string;
+  city?: string;
+  personaId?: string;
+};
+
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
     return "bytea";
@@ -19,8 +54,11 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 export const brand = pgTable("brand", {
   id: integer("id").primaryKey(),
-  name: text("name").notNull().default("Apostle Kwame Ministry"),
+  name: text("name").notNull().default("Act of Faith Chapel International"),
   tagline: text("tagline").notNull().default("Live Streaming"),
+  adminPinHash: text("admin_pin_hash"),
+  adminPinSalt: text("admin_pin_salt"),
+  adminPinUpdatedAt: timestamp("admin_pin_updated_at", { withTimezone: true }),
   logoMime: text("logo_mime"),
   logoData: bytea("logo_data"),
   logoVersion: integer("logo_version").notNull().default(0),
@@ -41,6 +79,18 @@ export const streams = pgTable(
     scheduledFor: text("scheduled_for"),
     coverVersion: integer("cover_version").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
+    // Simulated global audience (clearly labelled in the UI)
+    simEnabled: boolean("sim_enabled").notNull().default(false),
+    simFocus: text("sim_focus").notNull().default("auto"),
+    simPace: text("sim_pace").notNull().default("normal"),
+    simContext: text("sim_context"),
+    simTranscript: text("sim_transcript"),
+    simNextAt: timestamp("sim_next_at", { withTimezone: true }),
+    simCount: integer("sim_count").notNull().default(0),
+    simState: jsonb("sim_state")
+      .$type<SimStateJson>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -78,6 +128,14 @@ export const participants = pgTable(
     camOn: boolean("cam_on").notNull().default(true),
     handRaised: boolean("hand_raised").notNull().default(false),
     active: boolean("active").notNull().default(true),
+    muted: boolean("muted").notNull().default(false), // chat mute by admin/host
+    // Remote instructions from the admin dashboard (camera/mic/torch), consumed by the device
+    command: jsonb("command").$type<DeviceCommand | null>(),
+    commandSeq: integer("command_seq").notNull().default(0),
+    deviceInfo: jsonb("device_info").$type<DeviceInfo | null>(),
+    photoMime: text("photo_mime"),
+    photoData: bytea("photo_data"),
+    photoVersion: integer("photo_version").notNull().default(0),
     joinedAt: timestamp("joined_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -102,11 +160,31 @@ export const messages = pgTable(
     name: text("name").notNull(),
     body: text("body").notNull(),
     kind: text("kind").notNull().default("chat"), // chat | system | reaction
+    origin: text("origin").notNull().default("real"), // real | sim
+    avatar: text("avatar"),
+    meta: jsonb("meta").$type<MessageMeta>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => [index("messages_stream_idx").on(table.streamId, table.id)],
+);
+
+export const simQueue = pgTable(
+  "sim_queue",
+  {
+    id: serial("id").primaryKey(),
+    streamId: integer("stream_id")
+      .notNull()
+      .references(() => streams.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    avatar: text("avatar").notNull(),
+    body: text("body").notNull(),
+    kind: text("kind").notNull().default("chat"),
+    meta: jsonb("meta").$type<MessageMeta>().notNull(),
+    deliverAt: timestamp("deliver_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("sim_queue_due_idx").on(table.streamId, table.deliverAt)],
 );
 
 export const signals = pgTable(

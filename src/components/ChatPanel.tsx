@@ -13,7 +13,44 @@ type Props = {
 
 const REACTIONS = ["❤️", "🔥", "😂", "👏", "🎉"];
 
-export default function ChatPanel({ messages, myId, onSend, onReact, variant }: Props) {
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function Avatar({ src, name, size }: { src: string | null; name: string; size: "sm" | "md" }) {
+  const box = size === "sm" ? "h-6 w-6 text-[9px]" : "h-7 w-7 text-[10px]";
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        className={`${box} shrink-0 rounded-full bg-white/10 object-cover ring-1 ring-black/40`}
+      />
+    );
+  }
+  return (
+    <span
+      className={`${box} grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-sky-500 to-indigo-500 font-bold ring-1 ring-black/40`}
+    >
+      {initials(name) || "?"}
+    </span>
+  );
+}
+
+export default function ChatPanel({
+  messages,
+  myId,
+  onSend,
+  onReact,
+  variant,
+}: Props) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -30,6 +67,7 @@ export default function ChatPanel({ messages, myId, onSend, onReact, variant }: 
   };
 
   const isOverlay = variant === "overlay";
+  const avatarSize = isOverlay ? "sm" : "md";
 
   return (
     <div
@@ -48,7 +86,7 @@ export default function ChatPanel({ messages, myId, onSend, onReact, variant }: 
       <div
         className={
           isOverlay
-            ? "pointer-events-auto max-h-44 space-y-1.5 overflow-y-auto px-3 pb-1 [scrollbar-width:none]"
+            ? "pointer-events-auto max-h-48 space-y-1.5 overflow-y-auto px-3 pb-1 [scrollbar-width:none]"
             : "flex-1 space-y-2 overflow-y-auto px-4 py-3"
         }
       >
@@ -65,23 +103,33 @@ export default function ChatPanel({ messages, myId, onSend, onReact, variant }: 
           }
           if (m.kind === "reaction") {
             return (
-              <p key={m.id} className="text-sm text-white/80">
-                <span className="font-semibold text-fuchsia-300">{m.name}</span>{" "}
+              <div key={m.id} className="flex items-center gap-2 text-sm text-white/80">
+                <Avatar src={m.avatar} name={m.name} size={avatarSize} />
+                <span className="font-semibold text-fuchsia-300">
+                  {m.name}
+                </span>
                 <span className="text-lg">{m.body}</span>
-              </p>
+              </div>
             );
           }
           return (
-            <p key={m.id} className="text-sm leading-snug">
-              <span
-                className={`font-semibold ${
-                  m.participantId === myId ? "text-emerald-300" : "text-sky-300"
+            <div key={m.id} className="flex items-start gap-2">
+              <Avatar src={m.avatar} name={m.name} size={avatarSize} />
+              <p
+                className={`min-w-0 flex-1 text-sm leading-snug ${
+                  isOverlay ? "drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" : ""
                 }`}
               >
-                {m.name}
-              </span>{" "}
-              <span className="text-white/90">{m.body}</span>
-            </p>
+                <span
+                  className={`font-semibold ${
+                    m.participantId === myId ? "text-emerald-300" : "text-sky-300"
+                  }`}
+                >
+                  {m.name}
+                </span>{" "}
+                <span className="text-white/90">{m.body}</span>
+              </p>
+            </div>
           );
         })}
         <div ref={endRef} />

@@ -212,6 +212,7 @@ export async function uploadImage<T>(
   image: Blob | null,
   fields: Record<string, string>,
   filename = "image",
+  headers: Record<string, string> = {},
 ): Promise<UploadOutcome<T>> {
   const parse = async (res: Response): Promise<UploadOutcome<T>> => {
     const text = await res.text();
@@ -238,7 +239,7 @@ export async function uploadImage<T>(
       const ext = image.type.split("/")[1]?.replace("svg+xml", "svg") ?? "bin";
       form.append("file", image, `${filename}.${ext}`);
     }
-    const res = await fetch(url, { method: "POST", body: form, cache: "no-store" });
+    const res = await fetch(url, { method: "POST", body: form, cache: "no-store", headers });
     const outcome = await parse(res);
     // A real answer from our API (even an error) is final — only transport failures fall through.
     if (outcome.ok || (outcome.status < 500 && outcome.status !== 404)) return outcome;
@@ -253,7 +254,7 @@ export async function uploadImage<T>(
     if (image) body.imageBase64 = await blobToBase64(image);
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       cache: "no-store",
     });

@@ -1,8 +1,11 @@
 "use client";
 
+import AudiencePanel from "@/components/AudiencePanel";
 import BrandMark from "@/components/BrandMark";
 import CameraControls from "@/components/CameraControls";
 import ChatPanel from "@/components/ChatPanel";
+import ProfilePhotoButton from "@/components/ProfilePhotoButton";
+import { prepareImage, uploadImage } from "@/lib/clientImage";
 import PreLiveStage from "@/components/PreLiveStage";
 import ShareSheet from "@/components/ShareSheet";
 import VideoTile from "@/components/VideoTile";
@@ -77,6 +80,9 @@ function JoinGate({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const { brand } = useBrand(initialBrand);
 
   useEffect(() => {
@@ -100,6 +106,18 @@ function JoinGate({
         return;
       }
       rememberName(data.name);
+      if (photoBlob) {
+        try {
+          await uploadImage(
+            `/api/streams/${data.code}/photo`,
+            photoBlob,
+            { token: data.token },
+            "photo",
+          );
+        } catch {
+          /* join succeeded even if the photo did not */
+        }
+      }
       onJoined({
         code: data.code,
         participantId: data.participantId,
@@ -165,6 +183,48 @@ function JoinGate({
         ) : (
           <div className="mt-6 space-y-3">
             <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                void (async () => {
+                  try {
+                    const prepared = await prepareImage(file, { maxEdge: 512, preferJpeg: true });
+                    setPhotoPreview(prepared.previewUrl);
+                    setPhotoBlob(prepared.blob);
+                  } catch {
+                    setError("Could not read that photo.");
+                  }
+                })();
+              }}
+            />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-amber-400 via-fuchsia-500 to-rose-500 text-lg font-black"
+                title="Add a profile photo"
+              >
+                {photoPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoPreview} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  "📷"
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/20"
+              >
+                {photoPreview ? "Change photo" : "Add profile photo (optional)"}
+              </button>
+            </div>
+            <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your display name"
@@ -205,6 +265,7 @@ function Room({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [coverNonce, setCoverNonce] = useState(0);
+  const [audienceOpen, setAudienceOpen] = useState(false);
   const [floaters, setFloaters] = useState<{ id: number; emoji: string; left: number }[]>(
     [],
   );
@@ -221,6 +282,17 @@ function Room({
   const requests = useMemo(
     () => room.participants.filter((p) => p.requestState === "pending"),
     [room.participants],
+  );
+
+  const sim = room.stream?.sim;
+  const simActive = Boolean(sim?.enabled);
+  const clearedAtId = sim?.clearedAtId ?? 0;
+  const visibleMessages = useMemo(
+    () =>
+      clearedAtId > 0
+        ? room.messages.filter((m) => !(m.origin === "sim" && m.id <= clearedAtId))
+        : room.messages,
+    [room.messages, clearedAtId],
   );
 
   const me = room.me;
@@ -296,6 +368,23 @@ function Room({
     );
   };
 
+  const audienceButton = (
+    <button
+      onClick={() => setAudienceOpen(true)}
+      className={`relative rounded-full px-4 py-2 text-xs font-bold transition ${
+        simActive
+          ? "bg-violet-600 text-white shadow-[0_0_16px_rgba(139,92,246,0.55)]"
+          : "bg-white/10 text-white/80 hover:bg-white/20"
+      }`}
+      title="Simulated global audience"
+    >
+      {simActive && (
+        <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
+      )}
+      ✦ Audience {simActive ? "on" : "off"}
+    </button>
+  );
+
   const peopleList = (
     <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
       {room.participants.map((p) => (
@@ -335,6 +424,13 @@ function Room({
             {ended ? "ended" : prelive ? "soon" : "live"}
           </span>
           <BrandMark brand={brand} size="sm" showText={false} />
+          <ProfilePhotoButton
+            code={identity.code}
+            token={identity.token}
+            name={identity.name}
+            size="sm"
+            currentUrl={`/api/people/${identity.participantId}/photo`}
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">
               {room.stream?.title ?? "Live room"}
@@ -491,7 +587,7 @@ function Room({
             <div className="bg-gradient-to-t from-black via-black/80 to-transparent pt-10">
               <ChatPanel
                 variant="overlay"
-                messages={room.messages}
+                messages={visibleMessages}
                 myId={identity.participantId}
                 onSend={room.sendChat}
                 onReact={room.sendReaction}
@@ -503,11 +599,14 @@ function Room({
         {/* controls */}
         <div className="border-t border-white/10 bg-black/80 px-3 py-3">
           {prelive ? (
-            <p className="text-center text-xs text-white/50">
-              {isHost
-                ? "Upload your banner, then hit “Go live” when you are ready."
-                : "The show has not started — comments are open while you wait."}
-            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <p className="text-center text-xs text-white/50">
+                {isHost
+                  ? "Upload your banner, then hit “Go live” when you are ready."
+                  : "The show has not started — comments are open while you wait."}
+              </p>
+              {isHost && audienceButton}
+            </div>
           ) : iAmOnStage ? (
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -557,6 +656,7 @@ function Room({
                   Leave stage
                 </button>
               )}
+              {isHost && audienceButton}
               <span className="ml-auto text-[11px] text-white/40">
                 {isHost ? "You are hosting" : "You are on stage"}
               </span>
@@ -577,7 +677,7 @@ function Room({
       <aside className="hidden min-h-0 w-[360px] flex-col border-l border-white/10 bg-zinc-950 lg:flex">
         <ChatPanel
           variant="side"
-          messages={room.messages}
+          messages={visibleMessages}
           myId={identity.participantId}
           onSend={room.sendChat}
           onReact={room.sendReaction}
@@ -589,6 +689,18 @@ function Room({
           {peopleList}
         </div>
       </aside>
+
+      {isHost && sim && (
+        <AudiencePanel
+          open={audienceOpen}
+          onClose={() => setAudienceOpen(false)}
+          sim={sim}
+          onToggle={(enabled) => room.simToggle(enabled)}
+          onConfig={(patch) => room.simConfig(patch)}
+          onBurst={() => room.simBurst()}
+          onClear={() => room.simClear()}
+        />
+      )}
 
       <ShareSheet
         open={inviteOpen}

@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { messages, participants, streams } from "@/db/schema";
+import { ensureSchema } from "@/lib/server/ensureSchema";
 import type {
   MediaKind,
   PublicMessage,
@@ -37,6 +38,7 @@ export function asMedia(raw: unknown, fallback: MediaKind = "none"): MediaKind {
 }
 
 export async function findStream(code: string) {
+  await ensureSchema();
   const rows = await db
     .select()
     .from(streams)
@@ -90,12 +92,30 @@ export function toPublicParticipant(row: {
   };
 }
 
+export function avatarFor(
+  participantId: number,
+  name: string,
+  photoVersion = 0,
+) {
+  if (photoVersion > 0) return `/api/people/${participantId}/photo?v=${photoVersion}`;
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+  return `/api/avatar?s=p${participantId}&n=${encodeURIComponent(initials || "?")}`;
+}
+
 export function toPublicMessage(row: {
   id: number;
   name: string;
   body: string;
   kind: string;
   participantId: number | null;
+  origin?: string | null;
+  avatar?: string | null;
+  meta?: { flag?: string; country?: string } | null;
   createdAt: Date;
 }): PublicMessage {
   return {
@@ -104,6 +124,12 @@ export function toPublicMessage(row: {
     body: row.body,
     kind: row.kind === "system" || row.kind === "reaction" ? row.kind : "chat",
     participantId: row.participantId,
+    origin: row.origin === "sim" ? "sim" : "real",
+    avatar:
+      row.avatar ??
+      (row.participantId && row.kind !== "system" ? avatarFor(row.participantId, row.name) : null),
+    flag: row.meta?.flag ?? null,
+    country: row.meta?.country ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -157,8 +183,16 @@ export function summarize(
     coverVersion: number;
     createdAt: Date;
     startedAt: Date | null;
+    simEnabled: boolean;
+    simFocus: string;
+    simPace: string;
+    simContext: string | null;
+    simNextAt: Date | null;
+    simCount: number;
+    simState: { clearedAtId?: number } | null;
   },
   people: { role: string }[],
+  overrides: { simNextAt?: Date | null } = {},
 ): StreamSummary {
   const onStage = people.filter((p) => p.role === "host" || p.role === "guest").length;
   return {
@@ -176,6 +210,19 @@ export function summarize(
     onStage,
     createdAt: stream.createdAt.toISOString(),
     startedAt: stream.startedAt ? stream.startedAt.toISOString() : null,
+    sim: {
+      enabled: stream.simEnabled,
+      focus: (["auto", "blessing", "healing", "miracle", "offering", "prayer"].includes(stream.simFocus)
+        ? stream.simFocus
+        : "auto") as StreamSummary["sim"]["focus"],
+      pace: (["calm", "normal", "lively"].includes(stream.simPace)
+        ? stream.simPace
+        : "normal") as StreamSummary["sim"]["pace"],
+      context: stream.simContext,
+      nextAt: (overrides.simNextAt !== undefined ? overrides.simNextAt : stream.simNextAt)?.toISOString() ?? null,
+      count: stream.simCount,
+      clearedAtId: stream.simState?.clearedAtId ?? 0,
+    },
   };
 }
 

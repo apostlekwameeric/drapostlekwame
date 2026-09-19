@@ -10,7 +10,7 @@ export type BrandInfo = {
 };
 
 export const FALLBACK_BRAND: BrandInfo = {
-  name: "Apostle Kwame Ministry",
+  name: "Act of Faith Chapel International",
   tagline: "Live Streaming",
   logoVersion: 0,
   hasLogo: false,

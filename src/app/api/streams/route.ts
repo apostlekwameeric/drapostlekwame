@@ -1,10 +1,12 @@
 import { db } from "@/db";
 import { participants, streams } from "@/db/schema";
+import { ensureSchema } from "@/lib/server/ensureSchema";
 import {
   PRESENCE_WINDOW_MS,
   makeCode,
   makeToken,
   sanitizeName,
+  summarize,
   systemMessage,
 } from "@/lib/server/room";
 import type { StreamSummary } from "@/lib/types";
@@ -13,6 +15,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  await ensureSchema();
   const cutoff = new Date(Date.now() - PRESENCE_WINDOW_MS);
   const rows = await db
     .select()
@@ -42,29 +45,19 @@ export async function GET() {
 
   const live: StreamSummary[] = rows
     .map((r) => ({
-      code: r.code,
-      title: r.title,
-      hostName: r.hostName,
-      mode: (r.mode === "audio" ? "audio" : "video") as "audio" | "video",
-      status: "live" as const,
-      phase: (r.phase === "onair" ? "onair" : "prelive") as "onair" | "prelive",
-      tagline: r.tagline,
-      scheduledFor: r.scheduledFor,
-      coverVersion: r.coverVersion,
-      hasCover: r.coverVersion > 0,
+      summary: summarize(r, []),
       viewers: byStream.get(r.id)?.viewers ?? 0,
       onStage: byStream.get(r.id)?.onStage ?? 0,
-      createdAt: r.createdAt.toISOString(),
-      startedAt: r.startedAt ? r.startedAt.toISOString() : null,
       fresh: Date.now() - r.createdAt.getTime() < 45_000,
     }))
     .filter((r) => r.viewers > 0 || r.fresh)
-    .map(({ fresh: _fresh, ...rest }) => rest);
+    .map(({ summary, viewers, onStage }) => ({ ...summary, viewers, onStage }));
 
   return Response.json({ streams: live });
 }
 
 export async function POST(request: Request) {
+  await ensureSchema();
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const hostName = sanitizeName(body.hostName, "Host");
   const mode = body.mode === "audio" ? "audio" : "video";

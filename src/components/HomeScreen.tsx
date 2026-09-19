@@ -1,7 +1,6 @@
 "use client";
 
 import BrandMark from "@/components/BrandMark";
-import BrandSettings from "@/components/BrandSettings";
 import { recallName, rememberName, saveIdentity } from "@/lib/identity";
 import { useBrand, type BrandInfo } from "@/lib/useBrand";
 import type { StreamSummary } from "@/lib/types";
@@ -19,8 +18,7 @@ export default function HomeScreen({ initialBrand }: { initialBrand: BrandInfo }
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [brandOpen, setBrandOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+
   const { brand } = useBrand(initialBrand);
 
   useEffect(() => {
@@ -85,13 +83,13 @@ export default function HomeScreen({ initialBrand }: { initialBrand: BrandInfo }
         <header className="mb-10 flex flex-wrap items-center justify-between gap-3">
           <BrandMark brand={brand} size="md" />
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setBrandOpen(true)}
+            <a
+              href="/admin"
               className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/20"
-              title="Ministry branding"
+              title="Admin dashboard (PIN required)"
             >
-              ⚙️ Branding
-            </button>
+              🔐 Admin
+            </a>
             <input
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.trim().toLowerCase())}
@@ -249,21 +247,6 @@ export default function HomeScreen({ initialBrand }: { initialBrand: BrandInfo }
         </section>
       </div>
 
-      <BrandSettings
-        open={brandOpen}
-        brand={brand}
-        onClose={() => setBrandOpen(false)}
-        onSaved={() => {
-          setToast("Branding saved — your logo is live everywhere ✓");
-          setTimeout(() => setToast(null), 3000);
-        }}
-      />
-
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-emerald-400/30 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-100 shadow-xl backdrop-blur">
-          {toast}
-        </div>
-      )}
     </main>
   );
 }

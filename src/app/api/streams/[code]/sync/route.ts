@@ -7,6 +7,7 @@ import {
   summarize,
   toPublicParticipant,
 } from "@/lib/server/room";
+import { tickSimulator } from "@/lib/server/simulator";
 import type { IncomingSignal, SignalKind, SyncResponse } from "@/lib/types";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -46,13 +47,56 @@ export async function POST(
       payload: row.payload,
     }));
 
+  // Simulated audience: schedule/deliver generated comments (host-controlled, labelled).
+  let simNextAt: Date | null | undefined;
+  if (stream.simEnabled) {
+    try {
+      const claimed = await tickSimulator(stream);
+      if (claimed) simNextAt = claimed;
+    } catch (err) {
+      console.error("[sim] tick failed", err);
+    }
+  }
+
   const people = await activeParticipants(stream.id);
   const fresh = people.find((p) => p.id === me.id) ?? { ...me, lastSeenAt: new Date() };
   const chat = await recentMessages(stream.id, sinceMessageId);
 
+  // Remote instruction from the admin dashboard (camera / mic / light), delivered once.
+  const lastSeq = Number(body.commandSeq ?? 0) || 0;
+  let command: (typeof me)["command"] = null;
+  let commandSeq = me.commandSeq;
+  if (me.command && me.commandSeq > lastSeq && Date.now() - me.command.issuedAt < 120_000) {
+    command = me.command;
+  }
+  if (me.commandSeq !== lastSeq && !command) commandSeq = me.commandSeq;
+
+  // The device reports its cameras/torch so the dashboard can show real options.
+  if (body.device && typeof body.device === "object") {
+    const info = body.device as Record<string, unknown>;
+    await db
+      .update(participants)
+      .set({
+        deviceInfo: {
+          cameras: Array.isArray(info.cameras) ? (info.cameras as never[]).slice(0, 8) : [],
+          activeCameraId: typeof info.activeCameraId === "string" ? info.activeCameraId : null,
+          activeFacing:
+            info.activeFacing === "user" || info.activeFacing === "environment"
+              ? info.activeFacing
+              : "unknown",
+          torchSupported: Boolean(info.torchSupported),
+          torchOn: Boolean(info.torchOn),
+          reportedAt: Date.now(),
+        },
+      })
+      .where(eq(participants.id, me.id));
+  }
+
   const payload: SyncResponse = {
-    stream: summarize(stream, people),
-    me: toPublicParticipant(fresh),
+    stream: summarize(stream, people, { simNextAt }),
+    me: { ...toPublicParticipant(fresh), muted: fresh.muted },
+    command,
+    commandSeq,
     participants: people.map(toPublicParticipant),
     messages: chat,
     signals: inbox,

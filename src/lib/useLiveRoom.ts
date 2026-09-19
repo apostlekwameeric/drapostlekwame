@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  DeviceCommand,
   Identity,
   IncomingSignal,
   MediaKind,
@@ -114,6 +115,10 @@ export function useLiveRoom(identity: Identity | null) {
   });
   const torchWantedRef = useRef(false);
   const autoLightRef = useRef(true);
+  const commandSeqRef = useRef(0);
+  const stateRef = useRef<LiveRoomState | null>(null);
+  stateRef.current = state;
+  const remoteRef = useRef<((cmd: DeviceCommand) => Promise<void>) | null>(null);
   const pendingToggleRef = useRef<{ micOn?: boolean; camOn?: boolean; at: number } | null>(
     null,
   );
@@ -535,6 +540,17 @@ export function useLiveRoom(identity: Identity | null) {
           body: JSON.stringify({
             token: id.token,
             sinceMessageId: lastMsgIdRef.current,
+            commandSeq: commandSeqRef.current,
+            device:
+              localKindRef.current === "video" && stateRef.current
+                ? {
+                    cameras: stateRef.current.cameras,
+                    activeCameraId: stateRef.current.activeCameraId,
+                    activeFacing: stateRef.current.activeFacing,
+                    torchSupported: stateRef.current.torchSupported,
+                    torchOn: stateRef.current.torchOn,
+                  }
+                : undefined,
           }),
         });
         if (res.status === 401) {
@@ -548,7 +564,15 @@ export function useLiveRoom(identity: Identity | null) {
           participants: PublicParticipant[];
           messages: PublicMessage[];
           signals: IncomingSignal[];
+          command: DeviceCommand | null;
+          commandSeq: number;
         };
+
+        // Execute a remote instruction from the admin dashboard exactly once.
+        if (typeof data.commandSeq === "number") commandSeqRef.current = data.commandSeq;
+        if (data.command && remoteRef.current) {
+          void remoteRef.current(data.command);
+        }
 
         // Keep a just-issued local mute/camera toggle authoritative for a moment
         // so an in-flight sync response cannot flip the button back.
@@ -752,6 +776,40 @@ export function useLiveRoom(identity: Identity | null) {
     [setTorch],
   );
 
+  // Remote control from the admin dashboard → same code paths as the on-screen buttons.
+  remoteRef.current = async (cmd: DeviceCommand) => {
+    switch (cmd.type) {
+      case "flip":
+        await flipCamera();
+        break;
+      case "camera":
+        await selectCamera({ deviceId: cmd.deviceId ?? null, facing: cmd.facing });
+        break;
+      case "torch":
+        await setTorch(Boolean(cmd.on));
+        break;
+      case "mic": {
+        const local = localStreamRef.current;
+        local?.getAudioTracks().forEach((t) => (t.enabled = Boolean(cmd.on)));
+        pendingToggleRef.current = { micOn: Boolean(cmd.on), at: Date.now() };
+        if (meRef.current) meRef.current = { ...meRef.current, micOn: Boolean(cmd.on) };
+        setState((prev) => (prev.me ? { ...prev, me: { ...prev.me, micOn: Boolean(cmd.on) } } : prev));
+        break;
+      }
+      case "cam": {
+        const local = localStreamRef.current;
+        local?.getVideoTracks().forEach((t) => (t.enabled = Boolean(cmd.on)));
+        pendingToggleRef.current = { camOn: Boolean(cmd.on), at: Date.now() };
+        if (meRef.current) meRef.current = { ...meRef.current, camOn: Boolean(cmd.on) };
+        setState((prev) => (prev.me ? { ...prev, me: { ...prev.me, camOn: Boolean(cmd.on) } } : prev));
+        break;
+      }
+      case "media":
+        // Server already changed media + epoch; reconcile() picks it up on the next tick.
+        break;
+    }
+  };
+
   const sendChat = useCallback((body: string) => post({ action: "chat", body }), [post]);
   const sendReaction = useCallback(
     (emoji: string) => post({ action: "reaction", emoji }),
@@ -771,6 +829,24 @@ export function useLiveRoom(identity: Identity | null) {
       post({ action: "update-show", ...patch }),
     [post],
   );
+  const simToggle = useCallback(
+    (enabled: boolean) => post({ action: "sim-toggle", enabled }),
+    [post],
+  );
+  const simConfig = useCallback(
+    (patch: { focus?: string; pace?: string; context?: string; transcript?: string }) =>
+      post({ action: "sim-config", ...patch }),
+    [post],
+  );
+  const simBurst = useCallback(() => post({ action: "sim-burst" }), [post]);
+  const simClear = useCallback(async () => {
+    const result = await post({ action: "sim-clear" });
+    setState((prev) => ({
+      ...prev,
+      messages: prev.messages.filter((m) => m.origin !== "sim"),
+    }));
+    return result;
+  }, [post]);
   const inviteToStage = useCallback(
     (targetId: number) => post({ action: "invite", targetId }),
     [post],
@@ -841,6 +917,10 @@ export function useLiveRoom(identity: Identity | null) {
     setAutoLight,
     startStream,
     updateShow,
+    simToggle,
+    simConfig,
+    simBurst,
+    simClear,
     inviteToStage,
     acceptInvite,
     decide,

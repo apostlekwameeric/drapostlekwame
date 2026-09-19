@@ -3,8 +3,17 @@ import { messages, participants, signals, streams } from "@/db/schema";
 import {
   asMedia,
   authenticate,
+  avatarFor,
   systemMessage,
 } from "@/lib/server/room";
+import {
+  clearSimulated,
+  configureSimulator,
+  onHostMessage,
+  onViewerMessage,
+  planWave,
+  setSimulatorEnabled,
+} from "@/lib/server/simulator";
 import type { MediaKind, SignalKind } from "@/lib/types";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -30,13 +39,20 @@ export async function POST(
     case "chat": {
       const text = typeof body.body === "string" ? body.body.trim().slice(0, 400) : "";
       if (!text) return Response.json({ ok: false, error: "Empty message" });
+      if (me.muted) return Response.json({ ok: false, error: "You have been muted in chat" });
       await db.insert(messages).values({
         streamId: stream.id,
         participantId: me.id,
         name: me.name,
         body: text,
         kind: "chat",
+        origin: "real",
+        avatar: avatarFor(me.id, me.name, me.photoVersion ?? 0),
       });
+      if (stream.simEnabled) {
+        if (isHost) await onHostMessage(stream, text);
+        else await onViewerMessage(stream, me.name, text);
+      }
       return Response.json({ ok: true });
     }
 
@@ -48,7 +64,42 @@ export async function POST(
         name: me.name,
         body: emoji,
         kind: "reaction",
+        origin: "real",
+        avatar: avatarFor(me.id, me.name, me.photoVersion ?? 0),
       });
+      return Response.json({ ok: true });
+    }
+
+    case "sim-toggle": {
+      if (!isHost) return Response.json({ error: "Host only" }, { status: 403 });
+      const enabled = Boolean(body.enabled);
+      if (enabled !== stream.simEnabled) {
+        await setSimulatorEnabled(stream, enabled, me.name);
+      }
+      return Response.json({ ok: true, enabled });
+    }
+
+    case "sim-config": {
+      if (!isHost) return Response.json({ error: "Host only" }, { status: 403 });
+      await configureSimulator(stream, {
+        focus: body.focus,
+        pace: body.pace,
+        context: body.context,
+        transcript: body.transcript,
+      });
+      return Response.json({ ok: true });
+    }
+
+    case "sim-burst": {
+      if (!isHost) return Response.json({ error: "Host only" }, { status: 403 });
+      if (!stream.simEnabled) return Response.json({ ok: false, error: "Start the audience first" });
+      const sent = await planWave(stream, "ambient", { count: 3 });
+      return Response.json({ ok: true, queued: sent });
+    }
+
+    case "sim-clear": {
+      if (!isHost) return Response.json({ error: "Host only" }, { status: 403 });
+      await clearSimulated(stream);
       return Response.json({ ok: true });
     }
 

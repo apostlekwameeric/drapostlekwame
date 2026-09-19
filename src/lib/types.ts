@@ -21,7 +21,24 @@ export type PublicMessage = {
   body: string;
   kind: "chat" | "system" | "reaction";
   participantId: number | null;
+  origin: "real" | "sim";
+  avatar: string | null;
+  flag: string | null;
+  country: string | null;
   createdAt: string;
+};
+
+export type SimFocus = "auto" | "blessing" | "healing" | "miracle" | "offering" | "prayer";
+export type SimPace = "calm" | "normal" | "lively";
+
+export type SimStatus = {
+  enabled: boolean;
+  focus: SimFocus;
+  pace: SimPace;
+  context: string | null;
+  nextAt: string | null;
+  count: number;
+  clearedAtId: number;
 };
 
 export type IncomingSignal = {
@@ -50,11 +67,23 @@ export type StreamSummary = {
   onStage: number;
   createdAt: string;
   startedAt: string | null;
+  sim: SimStatus;
+};
+
+export type DeviceCommand = {
+  type: "flip" | "camera" | "torch" | "mic" | "cam" | "media";
+  deviceId?: string;
+  facing?: "user" | "environment";
+  on?: boolean;
+  media?: "video" | "audio";
+  issuedAt: number;
 };
 
 export type SyncResponse = {
   stream: StreamSummary;
-  me: PublicParticipant;
+  me: PublicParticipant & { muted?: boolean };
+  command: DeviceCommand | null;
+  commandSeq: number;
   participants: PublicParticipant[];
   messages: PublicMessage[];
   signals: IncomingSignal[];

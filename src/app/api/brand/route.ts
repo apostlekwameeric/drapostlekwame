@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { brand } from "@/db/schema";
+import { isAdminRequest, unauthorized } from "@/lib/server/admin";
 import { BRAND_ROW_ID, DEFAULT_BRAND, getBrand } from "@/lib/server/brand";
 import { ImageError, normalizeImage, readUploadedImage } from "@/lib/server/images";
 import { sql } from "drizzle-orm";
@@ -19,6 +20,7 @@ export async function GET() {
 
 /** Update ministry name / tagline and optionally upload a new logo (multipart or JSON). */
 export async function POST(request: Request) {
+  if (!(await isAdminRequest())) return unauthorized();
   try {
     const { bytes, fields } = await readUploadedImage(request, MAX_RAW_BYTES);
 
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
 
 /** Remove the uploaded logo (keeps the ministry name). */
 export async function DELETE() {
+  if (!(await isAdminRequest())) return unauthorized();
   try {
     await db
       .insert(brand)
